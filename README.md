@@ -9,7 +9,7 @@ QA automation for **prompt-based AI web apps**, built with **TypeScript**, **Nod
 | Feature | Details |
 |---|---|
 | Browser automation | Headless or headed Chromium via Playwright |
-| Navigation | `page.goto` waits for **`load`** (not `networkidle`) — works better on SPAs |
+| Navigation | `page.goto` waits for **`domcontentloaded`** (not full `load` / `networkidle`) — avoids hanging on slow third-party scripts |
 | Submit | Tries comma-separated submit selectors, then **Enter** and **Ctrl+Enter** on the input |
 | Output wait | Waits until **any** comma-separated `outputArea` selector has enough text (not only the first) |
 | Cookie banners | Best-effort dismiss (English + Turkish common labels) after navigation |

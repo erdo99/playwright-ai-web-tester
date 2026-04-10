@@ -63,7 +63,8 @@ export const config: AppConfig = {
     // These selectors are examples for a generic "prompt-box" AI app.
     // Change them to match the actual selectors of your target app.
     inputBox:
-      "textarea, input[type='text'], [contenteditable='true'], div.ProseMirror, [role='textbox']",
+      "[contenteditable='true'], div.ProseMirror, textarea:not([aria-hidden='true']), " +
+      "textarea, input[type='text'], [role='textbox']",
     submitButton:
       "button[type='submit'], " +
       "button:has-text('Generate'), button:has-text('Send'), button:has-text('Ask'), " +

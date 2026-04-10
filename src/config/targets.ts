@@ -42,18 +42,28 @@ export const TARGET_PRESETS: Record<string, TargetPreset> = {
     id: "mistral",
     label: "Mistral (Le Chat)",
     url: "https://chat.mistral.ai/chat",
-    notes: "Radix dialogs may block input until dismissed — generic prepare steps try to close them.",
+    notes:
+      "Prefer ProseMirror/contenteditable first — a hidden textarea can match before the real editor. " +
+      "Verify output is a real reply, not only the echoed prompt.",
     settleAfterNavigateMs: 600,
+    selectors: {
+      inputBox:
+        "[contenteditable='true'], div.ProseMirror, " +
+        "textarea:not([aria-hidden='true']), textarea, input[type='text'], [role='textbox']",
+    },
   },
   deepseek: {
     id: "deepseek",
     label: "DeepSeek",
     url: "https://chat.deepseek.com",
-    notes: "Extra settle time; selectors may need tuning if UI changes.",
+    notes:
+      "Often shows Human Verification / CAPTCHA for bots — headless runs usually fail until you pass checks " +
+      "in a real browser and reuse storage state, or test from an allowed region.",
     settleAfterNavigateMs: 3_000,
     selectors: {
       inputBox:
-        "textarea, [contenteditable='true'], div.ProseMirror, [role='textbox'], input[placeholder*='Message' i]",
+        "[contenteditable='true'], div.ProseMirror, textarea:not([aria-hidden='true']), " +
+        "textarea, [role='textbox'], input[placeholder*='Message' i]",
     },
   },
   kimi: {

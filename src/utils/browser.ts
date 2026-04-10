@@ -47,8 +47,9 @@ export interface NavigatePrepareOptions {
 }
 
 /**
- * Navigate to `url`. Uses `load` (not `networkidle`) — modern SPAs and chat
- * sites keep long-lived connections open, so `networkidle` often never fires.
+ * Navigate to `url`. Uses **`domcontentloaded`** (not `load`): the `load` event
+ * waits for all subresources; ads/analytics can delay or stall it and cause
+ * flaky 60s timeouts. `networkidle` is avoided — many SPAs never go idle.
  */
 export async function navigateTo(
   page: Page,
@@ -56,7 +57,25 @@ export async function navigateTo(
   prepare?: NavigatePrepareOptions,
 ): Promise<void> {
   logger.step(`Navigating to: ${url}`);
-  await page.goto(url, { waitUntil: "load", timeout: 60_000 });
+  const maxAttempts = 2;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90_000 });
+      break;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const retryable =
+        /ERR_TIMED_OUT|ERR_CONNECTION|ETIMEDOUT|Timeout|timed out/i.test(msg);
+      if (attempt < maxAttempts && retryable) {
+        logger.warn(`Navigation failed (attempt ${attempt}/${maxAttempts}): ${msg.slice(0, 160)}…`);
+        await sleepMs(2_500);
+        continue;
+      }
+      throw err;
+    }
+  }
+
   await preparePageAfterLoad(page, prepare);
   logger.success(`Page loaded: ${await page.title()}`);
 }
@@ -72,6 +91,7 @@ async function preparePageAfterLoad(
   await page.keyboard.press("Escape");
   await sleepMs(200);
   await dismissBlockingDialogs(page);
+  await attemptHumanVerificationAffordances(page);
 
   if (prepare?.extraDismissSelectors) {
     const sels = prepare.extraDismissSelectors
@@ -96,6 +116,79 @@ async function preparePageAfterLoad(
   if (settle > 0) {
     logger.debug(`Settling UI (${settle}ms)…`);
     await sleepMs(settle);
+  }
+}
+
+/**
+ * Best-effort interaction with lightweight “human verification” UI.
+ * May click reCAPTCHA/hCaptcha/Turnstile **checkbox iframes** or obvious **Verify** buttons.
+ * Does **not** solve image/audio challenges; headless browsers often still fail token checks.
+ */
+async function attemptHumanVerificationAffordances(page: Page): Promise<void> {
+  const buttonRes = [
+    /verify you are human/i,
+    /^verify$/i,
+    /^continue$/i,
+    /human verification/i,
+  ];
+  for (const re of buttonRes) {
+    try {
+      const btn = page.getByRole("button", { name: re });
+      if (await btn.first().isVisible({ timeout: 500 }).catch(() => false)) {
+        await btn.first().click({ timeout: 2_500 });
+        logger.warn(`Human-gate: clicked main-document button (${re})`);
+        await sleepMs(2_000);
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  try {
+    const frame = page
+      .frameLocator('iframe[src*="recaptcha/anchor"], iframe[title*="reCAPTCHA" i]')
+      .first();
+    const anchor = frame.locator("#recaptcha-anchor, .recaptcha-checkbox-border");
+    if (await anchor.first().isVisible({ timeout: 1_200 }).catch(() => false)) {
+      await anchor.first().click({ timeout: 3_000 });
+      logger.warn(
+        "Human-gate: clicked reCAPTCHA anchor — token / headless checks may still block.",
+      );
+      await sleepMs(3_000);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const frame = page.frameLocator('iframe[src*="hcaptcha.com"]').first();
+    const box = frame.locator("#checkbox, [role='checkbox']").first();
+    if (await box.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await box.click({ timeout: 3_000 });
+      logger.warn("Human-gate: clicked hCaptcha control — challenge may still appear.");
+      await sleepMs(2_000);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const frame = page
+      .frameLocator(
+        'iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], iframe[src*="cloudflare" i]',
+      )
+      .first();
+    const mark = frame.locator(
+      "input[type='checkbox'], [role='checkbox'], label, .ctp-checkbox-label",
+    ).first();
+    if (await mark.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await mark.click({ timeout: 2_500 });
+      logger.warn("Human-gate: clicked Cloudflare / Turnstile control.");
+      await sleepMs(2_000);
+    }
+  } catch {
+    /* ignore */
   }
 }
 

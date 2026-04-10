@@ -248,12 +248,18 @@ async function main(): Promise<void> {
     for (const preset of presets) {
       const cfg = applyPreset(baseConfig, preset);
       logger.section(`${preset.label} — ${cfg.url}`);
-      const reporter = await executeTestsForConfig(cfg, opts.headed, testsToRun);
-      reporter.printSummary();
-      const reportPath = reporter.save(cfg.resultsDir, preset.id);
-      logger.success(`JSON report → ${reportPath}`);
-      const rep = reporter.buildReport();
-      totalFailed += rep.summary.failed + rep.summary.error;
+      try {
+        const reporter = await executeTestsForConfig(cfg, opts.headed, testsToRun);
+        reporter.printSummary();
+        const reportPath = reporter.save(cfg.resultsDir, preset.id);
+        logger.success(`JSON report → ${reportPath}`);
+        const rep = reporter.buildReport();
+        totalFailed += rep.summary.failed + rep.summary.error;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error(`${preset.label}: run aborted — ${msg}`);
+        totalFailed += 1;
+      }
     }
 
     const logPath = `${baseConfig.resultsDir}/logs-${Date.now()}.json`;
