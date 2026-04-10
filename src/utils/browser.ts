@@ -40,15 +40,120 @@ export async function launchBrowser(headless = true): Promise<BrowserBundle> {
   return { browser, context, page };
 }
 
+/** Optional steps after `goto` — cookies, dialogs, site-specific clicks, settle time. */
+export interface NavigatePrepareOptions {
+  extraDismissSelectors?: string;
+  settleAfterNavigateMs?: number;
+}
+
 /**
  * Navigate to `url`. Uses `load` (not `networkidle`) — modern SPAs and chat
  * sites keep long-lived connections open, so `networkidle` often never fires.
  */
-export async function navigateTo(page: Page, url: string): Promise<void> {
+export async function navigateTo(
+  page: Page,
+  url: string,
+  prepare?: NavigatePrepareOptions,
+): Promise<void> {
   logger.step(`Navigating to: ${url}`);
   await page.goto(url, { waitUntil: "load", timeout: 60_000 });
-  await dismissCommonCookieBanners(page);
+  await preparePageAfterLoad(page, prepare);
   logger.success(`Page loaded: ${await page.title()}`);
+}
+
+async function preparePageAfterLoad(
+  page: Page,
+  prepare?: NavigatePrepareOptions,
+): Promise<void> {
+  await dismissCommonCookieBanners(page);
+  await dismissBlockingDialogs(page);
+  await page.keyboard.press("Escape");
+  await sleepMs(200);
+  await page.keyboard.press("Escape");
+  await sleepMs(200);
+  await dismissBlockingDialogs(page);
+
+  if (prepare?.extraDismissSelectors) {
+    const sels = prepare.extraDismissSelectors
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const sel of sels) {
+      try {
+        const loc = page.locator(sel).first();
+        if (await loc.isVisible({ timeout: 1_200 }).catch(() => false)) {
+          await loc.click({ timeout: 2_500 });
+          logger.debug(`Extra dismiss click: ${sel}`);
+          await sleepMs(350);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  const settle = prepare?.settleAfterNavigateMs ?? 0;
+  if (settle > 0) {
+    logger.debug(`Settling UI (${settle}ms)…`);
+    await sleepMs(settle);
+  }
+}
+
+/** Try to close Radix/modal dialogs that intercept pointer events. */
+async function dismissBlockingDialogs(page: Page): Promise<void> {
+  const buttonPatterns = [
+    /^Continue$/i,
+    /^Next$/i,
+    /^Accept( all)?$/i,
+    /^OK$/i,
+    /^Got it$/i,
+    /^I agree$/i,
+    /^Allow( all)?$/i,
+    /^Close$/i,
+    /^Dismiss$/i,
+    /^Kabul/i,
+    /^Devam/i,
+    /^Compris/i,
+    /^J'accepte/i,
+  ];
+
+  for (let round = 0; round < 4; round++) {
+    const dialog = page.locator('[role="dialog"]:visible').first();
+    if (!(await dialog.isVisible({ timeout: 600 }).catch(() => false))) {
+      break;
+    }
+
+    let clicked = false;
+    for (const pattern of buttonPatterns) {
+      try {
+        const btn = dialog.getByRole("button", { name: pattern });
+        if (await btn.first().isVisible({ timeout: 500 }).catch(() => false)) {
+          await btn.first().click({ timeout: 2_500 });
+          logger.debug(`Closed dialog via button matching ${pattern}`);
+          clicked = true;
+          await sleepMs(400);
+          break;
+        }
+      } catch {
+        /* try next pattern */
+      }
+    }
+
+    if (!clicked) {
+      try {
+        const anyBtn = dialog.getByRole("button").first();
+        if (await anyBtn.isVisible({ timeout: 400 }).catch(() => false)) {
+          await anyBtn.click({ timeout: 2_000 });
+          logger.debug("Closed dialog via first button in dialog");
+          await sleepMs(400);
+        } else {
+          break;
+        }
+      } catch {
+        break;
+      }
+    }
+  }
 }
 
 /** Best-effort; does not throw — many sites block automation until consent. */
@@ -118,7 +223,17 @@ export async function fillInput(
   text: string,
 ): Promise<void> {
   const el = await findElement(page, selector);
-  await el.click();
+  try {
+    await el.click({ timeout: 10_000 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`Click on input failed (${msg.slice(0, 120)}…) — trying force / focus…`);
+    try {
+      await el.click({ force: true, timeout: 5_000 });
+    } catch {
+      await el.focus();
+    }
+  }
   await el.fill("");          // clear any existing content
   if (text.length > 0) {
     await el.fill(text);      // bulk-fill (faster than typewrite)

@@ -17,6 +17,7 @@ QA automation for **prompt-based AI web apps**, built with **TypeScript**, **Nod
 | Failure screenshots | Saved when a test fails |
 | JSON reports | Timestamped run summary under `results/` |
 | CLI | `commander` with aliases and **positional URL / test names** when npm swallows flags |
+| Multi-site | **`--apps`** / **`--all-apps`** — run the same tests against many preset AI chat URLs (one browser session per site) |
 
 ---
 
@@ -25,8 +26,9 @@ QA automation for **prompt-based AI web apps**, built with **TypeScript**, **Nod
 ```
 ai-web-tester/
 ├── src/
-│   ├── index.ts              ← CLI entry (URL, cases, retries, headed)
+│   ├── index.ts              ← CLI entry (URL, cases, retries, headed, multi-site)
 │   ├── config/index.ts       ← Default URL, selectors, timeouts, test inputs
+│   ├── config/targets.ts     ← Preset sites (Perplexity, ChatGPT, Mistral, …)
 │   ├── tests/                ← valid, empty, long, special + baseTest runner
 │   └── utils/                ← browser, logger, validator, reporter, retry
 ├── screenshots/              ← Created on failure (gitignored)
@@ -95,11 +97,39 @@ npm run test:run -- https://perplexity.ai valid
 | `--tests <names>` | — | Alias of `--cases` |
 | `--headed` | — | Visible browser |
 | `--retries <n>` | — | Max **attempts** per test (includes the first try) |
+| `--apps <ids>` | — | Comma-separated **preset** ids (see `--list-apps`) |
+| `--all-apps` | — | Run **every** preset in `config/targets.ts` (long run) |
+| `--list-apps` | — | Print preset ids, URLs, notes, exit |
 
 ```bash
 node dist/index.js --target https://myapp.ai --cases valid --headed
 node dist/index.js -u https://myapp.ai -t valid,long --retries 5
 ```
+
+### Multi-site (several AI web UIs in one go)
+
+Presets live in **`src/config/targets.ts`** (Perplexity, ChatGPT, Mistral, DeepSeek, Kimi, Claude, Gemini, Groq, Copilot, Meta AI, Phind, …). Each site gets a **fresh browser**, the selected tests, and its own JSON report: `results/report-<preset-id>-<runId>.json`.
+
+```bash
+npm run build
+
+# List presets
+node dist/index.js --list-apps
+
+# Only a few (recommended: start with valid only)
+node dist/index.js --apps perplexity,mistral,deepseek --cases valid
+
+# Everything registered (can take a long time; many sites need login)
+node dist/index.js --all-apps --cases valid
+```
+
+Shortcut after build:
+
+```bash
+npm run test:all-apps
+```
+
+Many commercial chat UIs require **sign-in**, block **headless** traffic, or use different DOMs — expect failures until you tune selectors or use a saved [Playwright storage state](https://playwright.dev/docs/auth) for logged-in sessions.
 
 ### Environment variables
 
@@ -107,8 +137,9 @@ If you prefer not to pass flags:
 
 | Variable | Purpose |
 |---|---|
-| `AI_WEB_TESTER_URL` | Base URL (same as `--target`) |
+| `AI_WEB_TESTER_URL` | Base URL (same as `--target`; single-site mode) |
 | `AI_WEB_TESTER_TESTS` | Comma-separated test names (same as `--cases`) |
+| `AI_WEB_TESTER_APPS` | Comma-separated preset ids (same as `--apps`) |
 
 ### Help
 
@@ -126,6 +157,20 @@ Edit **`src/config/index.ts`** for your product under test.
 - **`selectors`** — Comma-separated CSS lists are tried **in order** for input and submit; **output** waits until **any** listed selector has enough text.
 - **`outputTimeoutMs`** — Default **60s** wait for model output (raise for slow models).
 - **`maxRetries` / `retryDelayMs`** — Flake handling.
+- **`extraDismissSelectors`** (optional) — Comma-separated CSS for extra clicks after load when you discover a site needs a specific “Continue” / banner control.
+- **`settleAfterNavigateMs`** (optional) — Extra wait after navigation + dismiss (helps slow SPAs).
+
+### When a site behaves differently
+
+Each product uses its own modals, cookies, and DOM. The runner applies a **generic prepare** step after every navigation: cookie-style buttons, **visible `[role="dialog"]` dismiss** (Continue / Accept / OK / …), **Escape**, then optional **per-site** fields above.
+
+Preset-specific tuning lives in **`src/config/targets.ts`** (e.g. `settleAfterNavigateMs` for DeepSeek, Mistral). When a new site fails:
+
+1. Run with `--headed` and inspect what blocks the input.
+2. Add selectors to that preset’s `selectors` or `extraDismissSelectors`, or increase `settleAfterNavigateMs`.
+3. Rebuild (`npm run build`) and run again.
+
+`fillInput` also falls back to **`force` click** and **focus** if a normal click hits an overlay (common with Radix/modals).
 
 Example shape:
 

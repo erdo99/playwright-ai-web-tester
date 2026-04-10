@@ -78,15 +78,18 @@ export class Reporter {
   }
 
   /**
-   * Save the report to `<resultsDir>/report-<runId>.json`
-   * and return the absolute file path.
+   * Save the report to `resultsDir`.
+   * @param filePrefix — optional slug (e.g. preset id) → `report-<prefix>-<runId>.json`
    */
-  save(resultsDir: string): string {
+  save(resultsDir: string, filePrefix?: string): string {
     if (!fs.existsSync(resultsDir)) {
       fs.mkdirSync(resultsDir, { recursive: true });
     }
     const report = this.buildReport();
-    const filePath = path.resolve(resultsDir, `report-${this.runId}.json`);
+    const name = filePrefix
+      ? `report-${filePrefix}-${this.runId}.json`
+      : `report-${this.runId}.json`;
+    const filePath = path.resolve(resultsDir, name);
     fs.writeFileSync(filePath, JSON.stringify(report, null, 2), "utf-8");
     return filePath;
   }

@@ -39,6 +39,16 @@ export interface AppConfig {
   screenshotsDir: string;
   /** Directory where JSON results are saved */
   resultsDir: string;
+
+  /**
+   * Comma-separated CSS — extra clicks after load (site-specific banners, “Continue”, etc.).
+   * Presets in `targets.ts` can set these per site as you discover needs.
+   */
+  extraDismissSelectors?: string;
+  /**
+   * Extra wait (ms) after navigation + dismiss steps — helps slow SPAs (e.g. chat shell hydration).
+   */
+  settleAfterNavigateMs?: number;
 }
 
 // ─────────────────────────────────────────────
@@ -52,7 +62,8 @@ export const config: AppConfig = {
   selectors: {
     // These selectors are examples for a generic "prompt-box" AI app.
     // Change them to match the actual selectors of your target app.
-    inputBox: "textarea, input[type='text'], [contenteditable='true']",
+    inputBox:
+      "textarea, input[type='text'], [contenteditable='true'], div.ProseMirror, [role='textbox']",
     submitButton:
       "button[type='submit'], " +
       "button:has-text('Generate'), button:has-text('Send'), button:has-text('Ask'), " +
